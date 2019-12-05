@@ -29,12 +29,12 @@
 //! assert_eq!(cell.get().await, None);
 //!
 //! // Perform potentially expensive initialization.
-//! let value = cell.get_or_init(|| ready(21 + 21)).await;
+//! let value = cell.get_or_init(async { 21 + 21 }).await;
 //! assert_eq!(*value, 42);
 //! assert_eq!(cell.get().await, Some(&42));
 //!
 //! // The cell is already initialized.
-//! let value = cell.get_or_init(|| ready(unreachable!())).await;
+//! let value = cell.get_or_init(async { unreachable!() }).await;
 //! assert_eq!(*value, 42);
 //! assert_eq!(cell.get().await, Some(&42));
 //! # Ok(())
@@ -54,7 +54,7 @@
 //!
 //! let cell = DoubleCheckedCell::new();
 //!
-//! let contents: Result<_, tokio::io::Error> = cell.get_or_try_init(|| async {
+//! let contents: Result<_, tokio::io::Error> = cell.get_or_try_init(async {
 //!     let mut file = File::open("not-found.txt").await?;
 //!     let mut contents = String::new();
 //!     file.read_to_string(&mut contents).await?;
@@ -145,7 +145,7 @@ impl<T> DoubleCheckedCell<T> {
     /// # }
     /// ```
     pub async fn get(&self) -> Option<&T> {
-        self.get_or_try_init(|| ready(Err(()))).await.ok()
+        self.get_or_try_init(ready(Err(()))).await.ok()
     }
 
     /// Borrows the value if the cell is initialized or initializes it from
@@ -168,21 +168,20 @@ impl<T> DoubleCheckedCell<T> {
     /// let cell = DoubleCheckedCell::new();
     ///
     /// // Initialize the cell.
-    /// let value = cell.get_or_init(|| ready(1 + 2)).await;
+    /// let value = cell.get_or_init(async { 1 + 2 }).await;
     /// assert_eq!(*value, 3);
     ///
     /// // The cell is now immutable.
-    /// let value = cell.get_or_init(|| ready(42)).await;
+    /// let value = cell.get_or_init(async { 42 }).await;
     /// assert_eq!(*value, 3);
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn get_or_init<F, Fut>(&self, init: F) -> &T
+    pub async fn get_or_init<Fut>(&self, init: Fut) -> &T
     where
-        F: FnOnce() -> Fut,
         Fut: Future<Output = T>
     {
-        self.get_or_try_init(|| init().map(Ok)).await.void_unwrap()
+        self.get_or_try_init(init.map(Ok)).await.void_unwrap()
     }
 
     /// Borrows the value if the cell is initialized or attempts to initialize
@@ -208,20 +207,19 @@ impl<T> DoubleCheckedCell<T> {
     ///
     /// let cell = DoubleCheckedCell::new();
     ///
-    /// let result = cell.get_or_try_init(|| ready("not an integer".parse())).await;
+    /// let result = cell.get_or_try_init(async { "not an integer".parse() }).await;
     /// assert!(result.is_err());
     ///
-    /// let result = cell.get_or_try_init(|| ready("42".parse())).await;
+    /// let result = cell.get_or_try_init(async { "42".parse() }).await;
     /// assert_eq!(result, Ok(&42));
     ///
-    /// let result = cell.get_or_try_init(|| ready("irrelevant".parse())).await;
+    /// let result = cell.get_or_try_init(async { "irrelevant".parse() }).await;
     /// assert_eq!(result, Ok(&42));
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn get_or_try_init<F, E, Fut>(&self, init: F) -> Result<&T, E>
+    pub async fn get_or_try_init<Fut, E>(&self, init: Fut) -> Result<&T, E>
     where
-        F: FnOnce() -> Fut,
         Fut: Future<Output = Result<T, E>>
     {
         // Safety comes down to the double checked locking here. All other
@@ -246,7 +244,7 @@ impl<T> DoubleCheckedCell<T> {
                 // cell was not yet initialized, and no one else could have
                 // initialized it, because that requires holding the mutex.
                 {
-                    let result = init().await?;
+                    let result = init.await?;
 
                     // Consider all possible control flows:
                     // - init returns Ok(T)
@@ -338,7 +336,7 @@ mod tests {
 
         {
             let cell = DoubleCheckedCell::new();
-            cell.get_or_init(|| ready(rc.clone())).await;
+            cell.get_or_init(ready(rc.clone())).await;
 
             assert_eq!(Rc::strong_count(&rc), 2);
         }
@@ -355,9 +353,9 @@ mod tests {
             let n = n.clone();
             let cell = cell.clone();
             tokio::task::spawn(async move {
-                let value = cell.get_or_init(|| {
+                let value = cell.get_or_init(async {
                     n.fetch_add(1, Ordering::Relaxed);
-                    ready(true)
+                    true
                 }).await;
 
                 assert!(*value);
@@ -376,7 +374,7 @@ mod tests {
         assert_sync(DoubleCheckedCell::<usize>::new());
         assert_send(DoubleCheckedCell::<usize>::new());
         let cell = DoubleCheckedCell::<usize>::new();
-        assert_send(cell.get_or_init(|| ready(1)));
+        assert_send(cell.get_or_init(async { 1 }));
     }
 
     struct _AssertObjectSafe(Box<DoubleCheckedCell<usize>>);
