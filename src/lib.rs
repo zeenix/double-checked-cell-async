@@ -18,22 +18,27 @@
 //! # Examples
 //!
 //! ```
+//! # #[tokio::main]
+//! # async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! use double_checked_cell::DoubleCheckedCell;
+//! use futures::future::ready;
 //!
 //! let cell = DoubleCheckedCell::new();
 //!
 //! // The cell starts uninitialized.
-//! assert_eq!(cell.get(), None);
+//! assert_eq!(cell.get().await, None);
 //!
 //! // Perform potentially expensive initialization.
-//! let value = cell.get_or_init(|| 21 + 21);
+//! let value = cell.get_or_init(|| ready(21 + 21)).await;
 //! assert_eq!(*value, 42);
-//! assert_eq!(cell.get(), Some(&42));
+//! assert_eq!(cell.get().await, Some(&42));
 //!
 //! // The cell is already initialized.
-//! let value = cell.get_or_init(|| unreachable!());
+//! let value = cell.get_or_init(|| ready(unreachable!())).await;
 //! assert_eq!(*value, 42);
-//! assert_eq!(cell.get(), Some(&42));
+//! assert_eq!(cell.get().await, Some(&42));
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! # Errors
@@ -41,65 +46,38 @@
 //! `DoubleCheckedCell` supports fallible initialization.
 //!
 //! ```
-//! use std::fs::File;
-//! use std::io;
-//! use std::io::prelude::*;
+//! # #[tokio::main]
+//! # async fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! use tokio::fs::File;
+//! use tokio::prelude::*;
 //! use double_checked_cell::DoubleCheckedCell;
 //!
 //! let cell = DoubleCheckedCell::new();
 //!
-//! let contents: io::Result<&String> = cell.get_or_try_init(|| {
-//!     let mut file = File::open("not-found.txt")?;
+//! let contents: Result<_, tokio::io::Error> = cell.get_or_try_init(|| async {
+//!     let mut file = File::open("not-found.txt").await?;
 //!     let mut contents = String::new();
-//!     file.read_to_string(&mut contents)?;
+//!     file.read_to_string(&mut contents).await?;
 //!     Ok(contents)
-//! });
+//! }).await;
 //!
 //! // File not found.
 //! assert!(contents.is_err());
 //!
 //! // Cell remains uninitialized for now.
-//! assert_eq!(cell.get(), None);
+//! assert_eq!(cell.get().await, None);
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! # Unwind safety
 //!
 //! If an initialization closure panics, the `DoubleCheckedCell` remains
-//! uninitialized. Initialization can be retried later, there is no poisoning.
-//!
-//! ```
-//! use std::panic;
-//! use double_checked_cell::DoubleCheckedCell;
-//!
-//! let cell = DoubleCheckedCell::new();
-//!
-//! // Panic during initialization.
-//! assert!(panic::catch_unwind(|| {
-//!     cell.get_or_init(|| panic!("oh no!"));
-//! }).is_err());
-//!
-//! // Cell remains uninitialized.
-//! assert!(cell.get().is_none());
-//! ```
-//!
-//! # Cargo features
-//!
-//! * `parking_lot_mutex`: Internally use mutexes backed by
-//!   [parking_lot](https://crates.io/crates/parking_lot). Optional.
-//! * `const_fn`: Allows instanciating `DoubleCheckedCell` in const context.
-//!   Can be used as a replacement for
-//!   [lazy_static](https://crates.io/crates/lazy_static).
-//!   Currently nightly only. Optional.
-//!
-//!   ```rust,ignore
-//!   static LAZY_STATIC: DoubleCheckedCell<u32> = DoubleCheckedCell::new();
-//!   ```
+//! uninitialized, however the `catch_unwind` future combinator currently can't be
+//! applied to the futures returned from `get_or_init` and `get_or_try_init`.
 
-#![doc(html_root_url = "https://docs.rs/double-checked-cell/2.0.2")]
+#![doc(html_root_url = "https://docs.rs/async-double-checked-cell/0.1.0")]
 #![warn(missing_debug_implementations)]
-
-#[cfg(test)]
-extern crate scoped_pool;
 
 use std::cell::UnsafeCell;
 use std::future::Future;
@@ -135,10 +113,14 @@ impl<T> DoubleCheckedCell<T> {
     /// # Examples
     ///
     /// ```
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use double_checked_cell::DoubleCheckedCell;
     ///
     /// let cell = DoubleCheckedCell::<u32>::new();
-    /// assert_eq!(cell.get(), None);
+    /// assert_eq!(cell.get().await, None);
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn new() -> DoubleCheckedCell<T> {
         DoubleCheckedCell {
@@ -153,10 +135,14 @@ impl<T> DoubleCheckedCell<T> {
     /// # Examples
     ///
     /// ```
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use double_checked_cell::DoubleCheckedCell;
     ///
     /// let cell = DoubleCheckedCell::from("hello");
-    /// assert_eq!(cell.get(), Some(&"hello"));
+    /// assert_eq!(cell.get().await, Some(&"hello"));
+    /// # Ok(())
+    /// # }
     /// ```
     pub async fn get(&self) -> Option<&T> {
         self.get_or_try_init(|| ready(Err(()))).await.ok()
@@ -174,17 +160,22 @@ impl<T> DoubleCheckedCell<T> {
     /// # Examples
     ///
     /// ```
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use double_checked_cell::DoubleCheckedCell;
+    /// use futures::future::ready;
     ///
     /// let cell = DoubleCheckedCell::new();
     ///
     /// // Initialize the cell.
-    /// let value = cell.get_or_init(|| 1 + 2);
+    /// let value = cell.get_or_init(|| ready(1 + 2)).await;
     /// assert_eq!(*value, 3);
     ///
     /// // The cell is now immutable.
-    /// let value = cell.get_or_init(|| 42);
+    /// let value = cell.get_or_init(|| ready(42)).await;
     /// assert_eq!(*value, 3);
+    /// # Ok(())
+    /// # }
     /// ```
     pub async fn get_or_init<F, Fut>(&self, init: F) -> &T
     where
@@ -210,18 +201,23 @@ impl<T> DoubleCheckedCell<T> {
     /// # Examples
     ///
     /// ```
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use double_checked_cell::DoubleCheckedCell;
+    /// use futures::future::ready;
     ///
     /// let cell = DoubleCheckedCell::new();
     ///
-    /// let result = cell.get_or_try_init(|| "not an integer".parse());
+    /// let result = cell.get_or_try_init(|| ready("not an integer".parse())).await;
     /// assert!(result.is_err());
     ///
-    /// let result = cell.get_or_try_init(|| "42".parse());
+    /// let result = cell.get_or_try_init(|| ready("42".parse())).await;
     /// assert_eq!(result, Ok(&42));
     ///
-    /// let result = cell.get_or_try_init(|| "irrelevant".parse());
+    /// let result = cell.get_or_try_init(|| ready("irrelevant".parse())).await;
     /// assert_eq!(result, Ok(&42));
+    /// # Ok(())
+    /// # }
     /// ```
     pub async fn get_or_try_init<F, E, Fut>(&self, init: F) -> Result<&T, E>
     where
@@ -250,14 +246,15 @@ impl<T> DoubleCheckedCell<T> {
                 // cell was not yet initialized, and no one else could have
                 // initialized it, because that requires holding the mutex.
                 {
-                    let value = unsafe { &mut *self.value.get() }; // (A)
+                    let result = init().await?;
 
                     // Consider all possible control flows:
                     // - init returns Ok(T)
                     // - init returns Err(E)
                     // - init recursively tries to initialize the cell
                     // - init panics
-                    *value = Some(init().await?);
+                    let value = unsafe { &mut *self.value.get() }; // (A)
+                    value.replace(result);
                 }
 
                 self.initialized.store(true, Ordering::Release);
@@ -281,17 +278,31 @@ impl<T> DoubleCheckedCell<T> {
     /// # Examples
     ///
     /// ```
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use double_checked_cell::DoubleCheckedCell;
     ///
     /// let cell = DoubleCheckedCell::from(42);
     /// let contents = cell.into_inner();
     /// assert_eq!(contents, Some(42));
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn into_inner(self) -> Option<T> {
         // into_inner() is actually unconditionally safe:
         // https://github.com/rust-lang/rust/issues/35067
         #[allow(unused_unsafe)]
         unsafe { self.value.into_inner() }
+    }
+}
+
+impl<T> From<T> for DoubleCheckedCell<T> {
+    fn from(t: T) -> DoubleCheckedCell<T> {
+        DoubleCheckedCell {
+            value: UnsafeCell::new(Some(t)),
+            initialized: AtomicBool::new(true),
+            lock: Mutex::new(()),
+        }
     }
 }
 
@@ -313,6 +324,10 @@ impl<T> RefUnwindSafe for DoubleCheckedCell<T> {}
 #[cfg(test)]
 mod tests {
     use std::rc::Rc;
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicUsize;
+
+    use futures_util::future::join_all;
 
     use super::*;
 
@@ -331,28 +346,27 @@ mod tests {
         assert_eq!(Rc::strong_count(&rc), 1);
     }
 
-    /*#[tokio::test]
+    #[tokio::test(threaded_scheduler)]
     async fn test_threading() {
-        let n = AtomicUsize::new(0);
-        let cell = DoubleCheckedCell::new();
+        let n = Arc::new(AtomicUsize::new(0));
+        let cell = Arc::new(DoubleCheckedCell::new());
 
-        let pool = Pool::new(32);
+        let join_handles = (0..1000).map(|_| {
+            let n = n.clone();
+            let cell = cell.clone();
+            tokio::task::spawn(async move {
+                let value = cell.get_or_init(|| {
+                    n.fetch_add(1, Ordering::Relaxed);
+                    ready(true)
+                }).await;
 
-        pool.scoped(|scope| {
-            for _ in 0..1000 {
-                scope.execute(|| {
-                    let value = cell.get_or_init(|| {
-                        n.fetch_add(1, Ordering::Relaxed);
-                        ready(true)
-                    }).await;
-
-                    assert!(*value);
-                });
-            }
-        });
+                assert!(*value);
+            })
+        }).collect::<Vec<_>>();
+        join_all(join_handles).await;
 
         assert_eq!(n.load(Ordering::SeqCst), 1);
-    }*/
+    }
 
     #[test]
     fn test_sync_send() {
@@ -361,6 +375,8 @@ mod tests {
 
         assert_sync(DoubleCheckedCell::<usize>::new());
         assert_send(DoubleCheckedCell::<usize>::new());
+        let cell = DoubleCheckedCell::<usize>::new();
+        assert_send(cell.get_or_init(|| ready(1)));
     }
 
     struct _AssertObjectSafe(Box<DoubleCheckedCell<usize>>);
