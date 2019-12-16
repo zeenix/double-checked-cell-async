@@ -1,12 +1,12 @@
 [package]
-name = "double-checked-cell"
+name = "async-double-checked-cell"
 version = "2.0.2" # remember to update html_root_url
-authors = ["Niklas Fiekas <niklas.fiekas@backscattering.de>"]
+authors = ["Stefan Kaufhold <cere@fastmail.fm>", "Niklas Fiekas <niklas.fiekas@backscattering.de>"]
 license = "MIT/Apache-2.0"
-keywords = ["lazy", "cell", "once"]
+keywords = ["lazy", "cell", "once", "async"]
 readme = "README.md"
-repository = "https://github.com/niklasf/double-checked-cell"
-categories = ["concurrency"]
+repository = "https://github.com/cere42/double-checked-cell"
+categories = ["concurrency", "asynchronous"]
 description = "A thread-safe lazily initialized cell using double-checked locking"
 edition = "2018"
 
