@@ -18,26 +18,23 @@ If you do not need to change the value after initialization
 `DoubleCheckedCell<T>` is more efficient than a `Mutex<Option<T>>`.
 
 ```rust
-extern crate double_checked_cell;
-
 use double_checked_cell::DoubleCheckedCell;
+use futures::future::ready;
 
-fn main() {
-    let cell = DoubleCheckedCell::new();
+let cell = DoubleCheckedCell::new();
 
-    // The cell starts uninitialized.
-    assert_eq!(cell.get(), None);
+// The cell starts uninitialized.
+assert_eq!(cell.get().await, None);
 
-    // Perform potentially expensive initialization.
-    let value = cell.get_or_init(|| 21 + 21);
-    assert_eq!(*value, 42);
-    assert_eq!(cell.get(), Some(&42));
+// Perform potentially expensive initialization.
+let value = cell.get_or_init(async { 21 + 21 }).await;
+assert_eq!(*value, 42);
+assert_eq!(cell.get().await, Some(&42));
 
-    // The cell is already initialized.
-    let value = cell.get_or_init(|| unreachable!());
-    assert_eq!(*value, 42);
-    assert_eq!(cell.get(), Some(&42));
-}
+// The cell is already initialized.
+let value = cell.get_or_init(async { unreachable!() }).await;
+assert_eq!(*value, 42);
+assert_eq!(cell.get().await, Some(&42));
 ```
 
 Related crates
