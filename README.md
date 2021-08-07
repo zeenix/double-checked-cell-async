@@ -52,7 +52,7 @@ These crates are similar but distinct by design:
 Documentation
 -------------
 
-[Read the documentation](https://docs.rs/double-checked-cell)
+[Read the documentation](https://docs.rs/async-double-checked-cell)
 
 Changelog
 ---------
